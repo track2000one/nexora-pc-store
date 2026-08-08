@@ -42,12 +42,44 @@ function renderStatus(node, message, type = 'idle') {
   node.textContent = message;
 }
 
+async function checkReadiness(root) {
+  const token = sessionStorage.getItem(SESSION_KEY);
+  const status = root.querySelector('.admin-upload-status');
+  const button = root.querySelector('.admin-upload-button');
+  if (!token) return;
+
+  try {
+    const response = await fetch(`${API_URL}/api/admin/uploads/status`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'تعذر فحص Google Drive');
+
+    if (payload.data?.configured) {
+      root.dataset.ready = 'true';
+      button.disabled = false;
+      renderStatus(status, 'Google Drive متصل — جاهز للرفع', 'success');
+    } else {
+      root.dataset.ready = 'false';
+      button.disabled = true;
+      const missing = (payload.data?.missing || []).join(', ');
+      renderStatus(status, `يلزم إكمال إعداد Google Drive في Railway${missing ? `: ${missing}` : ''}`, 'warning');
+    }
+  } catch (error) {
+    renderStatus(status, error.message || 'تعذر فحص إعداد Google Drive.', 'error');
+  }
+}
+
 async function uploadFile(file, root) {
   const status = root.querySelector('.admin-upload-status');
   const button = root.querySelector('.admin-upload-button');
   const progress = root.querySelector('.admin-upload-progress > i');
 
   if (!file) return;
+  if (root.dataset.ready === 'false') {
+    renderStatus(status, 'أكمل إعداد Google Drive في Railway أولًا.', 'warning');
+    return;
+  }
   if (!ALLOWED_TYPES.has(file.type)) {
     renderStatus(status, 'صيغة غير مدعومة. استخدم JPG أو PNG أو WEBP أو GIF أو AVIF.', 'error');
     return;
@@ -106,7 +138,7 @@ async function uploadFile(file, root) {
   } finally {
     window.setTimeout(() => {
       root.classList.remove('uploading');
-      button.disabled = false;
+      button.disabled = root.dataset.ready === 'false';
       if (progress.style.width === '100%') progress.style.width = '0%';
       URL.revokeObjectURL(localUrl);
     }, 700);
@@ -116,6 +148,7 @@ async function uploadFile(file, root) {
 function buildUploader() {
   const root = document.createElement('div');
   root.className = 'admin-device-uploader';
+  root.dataset.ready = 'checking';
   root.innerHTML = `
     <input class="admin-upload-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden>
     <div class="admin-upload-visual" aria-hidden="true">
@@ -125,10 +158,10 @@ function buildUploader() {
       <b>رفع صورة من الجهاز</b>
       <span>اسحب الصورة هنا أو اخترها من الكمبيوتر</span>
       <small>JPG, PNG, WEBP, GIF, AVIF • الحد الأقصى 10 MB • تُرفع مباشرة إلى Google Drive</small>
-      <div class="admin-upload-status" data-state="idle">جاهز للرفع</div>
+      <div class="admin-upload-status" data-state="uploading">جاري فحص اتصال Google Drive...</div>
       <div class="admin-upload-progress"><i></i></div>
     </div>
-    <button type="button" class="admin-upload-button">اختيار صورة</button>
+    <button type="button" class="admin-upload-button" disabled>اختيار صورة</button>
   `;
 
   const input = root.querySelector('.admin-upload-input');
@@ -144,7 +177,7 @@ function buildUploader() {
   ['dragenter', 'dragover'].forEach((eventName) => {
     root.addEventListener(eventName, (event) => {
       event.preventDefault();
-      root.classList.add('dragging');
+      if (root.dataset.ready === 'true') root.classList.add('dragging');
     });
   });
   ['dragleave', 'drop'].forEach((eventName) => {
@@ -158,6 +191,7 @@ function buildUploader() {
     uploadFile(file, root);
   });
 
+  checkReadiness(root);
   return root;
 }
 
