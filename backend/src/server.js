@@ -42,7 +42,7 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.get('/', (_req, res) => {
   res.json({
     name: 'NEXORA PC Store API',
-    version: '1.3.0',
+    version: '1.3.1',
     status: 'online',
     endpoints: ['/api/health', '/api/products', '/api/categories', '/api/orders', '/api/admin', '/api/media/:fileId', '/api/admin/uploads/product-image']
   });
@@ -82,6 +82,24 @@ app.use((error, _req, res, _next) => {
 
   if (error?.code === 'INVALID_IMAGE_TYPE' || error?.code === 'UPLOAD_FILE_MISSING' || error?.code === 'INVALID_DRIVE_FILE_ID') {
     return res.status(400).json({ error: error.message });
+  }
+
+  if (error?.code === 'PRODUCT_GALLERY_LIMIT') {
+    return res.status(409).json({ error: error.message });
+  }
+
+  if (error?.code === 'PRODUCT_GALLERY_DB_ERROR') {
+    console.error('Product gallery database error:', {
+      message: error?.message,
+      prismaCode: error?.prismaCode,
+      fallbackCode: error?.fallbackCode
+    });
+    return res.status(500).json({
+      error: 'تعذر تسجيل الصورة في معرض المنتج.',
+      code: error?.prismaCode || error?.fallbackCode || 'PRODUCT_GALLERY_DB_ERROR',
+      message: error?.message,
+      hint: 'تم الوصول إلى Google Drive، لكن حدث خطأ أثناء ربط الصورة بالمنتج في PostgreSQL. أعد المحاولة بعد اكتمال نشر الـBackend؛ وإذا استمر الخطأ أرسل هذا النص كاملًا.'
+    });
   }
 
   if (error?.code === 'DRIVE_FILE_NOT_FOUND') {
