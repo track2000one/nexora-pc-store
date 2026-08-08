@@ -29,6 +29,19 @@ const upload = multer({
   }
 });
 
+router.get('/status', requireAdmin, (_req, res) => {
+  const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN', 'GOOGLE_DRIVE_FOLDER_ID'];
+  const missing = required.filter((name) => !String(process.env[name] || '').trim());
+  res.json({
+    data: {
+      configured: missing.length === 0,
+      missing,
+      maxFileSizeMb: 10,
+      allowedTypes: [...allowedMimeTypes]
+    }
+  });
+});
+
 router.post('/product-image', requireAdmin, upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) {
