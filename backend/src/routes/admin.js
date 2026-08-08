@@ -5,12 +5,18 @@ import { createAdminToken, requireAdmin, verifyAdminKey } from '../middleware/ad
 
 const router = Router();
 
-function serializeProduct(product) {
+function proxyUrl(req, fileId) {
+  if (!fileId) return null;
+  return `${req.protocol}://${req.get('host')}/api/media/${encodeURIComponent(fileId)}`;
+}
+
+function serializeProduct(product, req) {
   return {
     ...product,
     rating: Number(product.rating),
     price: Number(product.price),
-    oldPrice: product.oldPrice == null ? null : Number(product.oldPrice)
+    oldPrice: product.oldPrice == null ? null : Number(product.oldPrice),
+    imageUrl: product.imageDriveId ? proxyUrl(req, product.imageDriveId) : product.imageUrl
   };
 }
 
@@ -85,7 +91,7 @@ router.get('/products', requireAdmin, async (req, res, next) => {
       orderBy: [{ status: 'asc' }, { featured: 'desc' }, { updatedAt: 'desc' }]
     });
 
-    res.json({ data: products.map(serializeProduct), count: products.length });
+    res.json({ data: products.map((product) => serializeProduct(product, req)), count: products.length });
   } catch (error) {
     next(error);
   }
