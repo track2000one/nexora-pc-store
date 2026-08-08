@@ -29,6 +29,10 @@ const upload = multer({
   }
 });
 
+function proxyUrl(req, fileId) {
+  return `${req.protocol}://${req.get('host')}/api/media/${encodeURIComponent(fileId)}`;
+}
+
 router.get('/status', requireAdmin, async (_req, res, next) => {
   try {
     const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'];
@@ -69,7 +73,12 @@ router.post('/product-image', requireAdmin, upload.single('file'), async (req, r
     }
 
     const uploaded = await uploadProductImage(req.file);
-    res.status(201).json({ data: uploaded });
+    res.status(201).json({
+      data: {
+        ...uploaded,
+        imageUrl: proxyUrl(req, uploaded.fileId)
+      }
+    });
   } catch (error) {
     next(error);
   }
