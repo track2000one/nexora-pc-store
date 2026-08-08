@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAdmin } from '../middleware/admin.js';
@@ -45,6 +46,68 @@ function galleryImage(image, req) {
 async function productBySku(sku) {
   if (!sku) return null;
   return prisma.product.findUnique({ where: { sku } });
+}
+
+async function attachGalleryImage(product, uploaded) {
+  await ensureLegacyGalleryImage(prisma, product);
+  const currentCount = await prisma.productImage.count({ where: { productId: product.id } });
+  if (currentCount >= 10) {
+    const error = new Error('يمكن إضافة 10 صور كحد أقصى لكل منتج.');
+    error.code = 'PRODUCT_GALLERY_LIMIT';
+    throw error;
+  }
+
+  const shouldBePrimary = currentCount === 0 && !product.imageDriveId;
+  const data = {
+    productId: product.id,
+    driveId: uploaded.fileId,
+    imageUrl: uploaded.imageUrl,
+    altText: product.name,
+    sortOrder: currentCount,
+    isPrimary: shouldBePrimary
+  };
+
+  try {
+    return await prisma.productImage.create({ data });
+  } catch (error) {
+    if (error?.code === 'P2002') {
+      const existing = await prisma.productImage.findUnique({
+        where: { productId_driveId: { productId: product.id, driveId: uploaded.fileId } }
+      });
+      if (existing) return existing;
+    }
+
+    // Defensive fallback. This also protects deployments where the running
+    // Prisma client is briefly out of sync while Railway is rolling services.
+    try {
+      const id = randomUUID();
+      await prisma.$executeRaw`
+        INSERT INTO "ProductImage"
+          ("id", "productId", "driveId", "imageUrl", "altText", "sortOrder", "isPrimary", "createdAt", "updatedAt")
+        VALUES
+          (${id}, ${product.id}, ${uploaded.fileId}, ${uploaded.imageUrl}, ${product.name}, ${currentCount}, ${shouldBePrimary}, NOW(), NOW())
+        ON CONFLICT ("productId", "driveId") DO NOTHING
+      `;
+
+      const inserted = await prisma.productImage.findUnique({
+        where: { productId_driveId: { productId: product.id, driveId: uploaded.fileId } }
+      });
+      if (inserted) return inserted;
+    } catch (fallbackError) {
+      const wrapped = new Error(
+        `تعذر تسجيل الصورة في معرض المنتج. Prisma: ${error?.code || error?.message || 'unknown'}; SQL fallback: ${fallbackError?.code || fallbackError?.message || 'unknown'}`
+      );
+      wrapped.code = 'PRODUCT_GALLERY_DB_ERROR';
+      wrapped.prismaCode = error?.code || null;
+      wrapped.fallbackCode = fallbackError?.code || null;
+      throw wrapped;
+    }
+
+    const wrapped = new Error(`تعذر تسجيل الصورة في معرض المنتج: ${error?.code || error?.message || 'unknown'}`);
+    wrapped.code = 'PRODUCT_GALLERY_DB_ERROR';
+    wrapped.prismaCode = error?.code || null;
+    throw wrapped;
+  }
 }
 
 router.get('/status', requireAdmin, async (_req, res, next) => {
@@ -133,26 +196,14 @@ router.post('/product-image', requireAdmin, upload.single('file'), async (req, r
     let attachedImage = null;
 
     if (product) {
-      const currentCount = await prisma.productImage.count({ where: { productId: product.id } });
-      const shouldBePrimary = currentCount === 0 && !product.imageDriveId;
+      attachedImage = await attachGalleryImage(product, uploaded);
 
-      attachedImage = await prisma.productImage.create({
-        data: {
-          productId: product.id,
-          driveId: uploaded.fileId,
-          imageUrl: uploaded.imageUrl,
-          altText: product.name,
-          sortOrder: currentCount,
-          isPrimary: shouldBePrimary
-        }
-      });
-
-      if (shouldBePrimary || !product.imageDriveId) {
+      if (attachedImage.isPrimary || !product.imageDriveId) {
         await prisma.product.update({
           where: { id: product.id },
           data: {
-            imageDriveId: uploaded.fileId,
-            imageUrl: uploaded.imageUrl
+            imageDriveId: attachedImage.driveId,
+            imageUrl: attachedImage.imageUrl
           }
         });
       }
