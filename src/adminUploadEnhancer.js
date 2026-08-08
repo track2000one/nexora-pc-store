@@ -42,6 +42,12 @@ function renderStatus(node, message, type = 'idle') {
   node.textContent = message;
 }
 
+function apiErrorMessage(payload, fallback) {
+  return [payload?.error || fallback, payload?.message, payload?.hint, payload?.missingConfiguration]
+    .filter(Boolean)
+    .join(' — ');
+}
+
 async function checkReadiness(root) {
   const token = sessionStorage.getItem(SESSION_KEY);
   const status = root.querySelector('.admin-upload-status');
@@ -53,12 +59,13 @@ async function checkReadiness(root) {
       headers: { Authorization: `Bearer ${token}` }
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || 'تعذر فحص Google Drive');
+    if (!response.ok) throw new Error(apiErrorMessage(payload, 'تعذر فحص Google Drive'));
 
-    if (payload.data?.configured) {
+    if (payload.data?.configured && payload.data?.connected !== false) {
       root.dataset.ready = 'true';
       button.disabled = false;
-      renderStatus(status, 'Google Drive متصل — جاهز للرفع', 'success');
+      const folderName = payload.data?.folder?.name;
+      renderStatus(status, folderName ? `Google Drive متصل — المجلد: ${folderName}` : 'Google Drive متصل — جاهز للرفع', 'success');
     } else {
       root.dataset.ready = 'false';
       button.disabled = true;
@@ -66,6 +73,8 @@ async function checkReadiness(root) {
       renderStatus(status, `يلزم إكمال إعداد Google Drive في Railway${missing ? `: ${missing}` : ''}`, 'warning');
     }
   } catch (error) {
+    root.dataset.ready = 'false';
+    button.disabled = true;
     renderStatus(status, error.message || 'تعذر فحص إعداد Google Drive.', 'error');
   }
 }
@@ -77,7 +86,7 @@ async function uploadFile(file, root) {
 
   if (!file) return;
   if (root.dataset.ready === 'false') {
-    renderStatus(status, 'أكمل إعداد Google Drive في Railway أولًا.', 'warning');
+    renderStatus(status, 'Google Drive غير جاهز. أعد فتح نافذة المنتج بعد اكتمال نشر الـBackend.', 'warning');
     return;
   }
   if (!ALLOWED_TYPES.has(file.type)) {
@@ -114,10 +123,7 @@ async function uploadFile(file, root) {
     });
 
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const extra = payload.missingConfiguration ? ` ${payload.missingConfiguration}` : '';
-      throw new Error((payload.error || 'تعذر رفع الصورة.') + extra);
-    }
+    if (!response.ok) throw new Error(apiErrorMessage(payload, 'تعذر رفع الصورة.'));
 
     progress.style.width = '100%';
     const { driveInput, urlInput } = findMediaInputs(root.closest('.admin-media-fields') || document);
@@ -125,11 +131,12 @@ async function uploadFile(file, root) {
     setReactInputValue(urlInput, payload.data.imageUrl || '');
     updatePreview(payload.data.imageUrl || localUrl);
 
+    const destination = payload.data.folderName ? ` داخل ${payload.data.folderName}` : '';
     renderStatus(
       status,
       payload.data.publicPermission === false
-        ? 'تم الرفع، لكن تعذر جعل الصورة عامة تلقائيًا. راجع صلاحية المشاركة في Drive.'
-        : 'تم رفع الصورة إلى Google Drive وربطها بالمنتج بنجاح.',
+        ? `تم الرفع${destination}، لكن تعذر جعل الصورة عامة تلقائيًا. راجع صلاحية المشاركة في Drive.`
+        : `تم رفع الصورة إلى Google Drive${destination} وربطها بالمنتج بنجاح.`,
       payload.data.publicPermission === false ? 'warning' : 'success'
     );
   } catch (error) {
