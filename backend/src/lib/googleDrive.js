@@ -2,6 +2,9 @@ import { Readable } from 'node:stream';
 import path from 'node:path';
 import { google } from 'googleapis';
 
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const MANAGED_FOLDER_NAME = 'NEXORA Product Images';
+
 function requiredEnv(name) {
   const value = String(process.env[name] || '').trim();
   if (!value) {
@@ -10,6 +13,22 @@ function requiredEnv(name) {
     throw error;
   }
   return value;
+}
+
+function optionalEnv(name) {
+  return String(process.env[name] || '').trim();
+}
+
+function normalizeGoogleError(error, operation = 'Google Drive request failed') {
+  const status = Number(error?.response?.status || error?.code || 0) || 502;
+  const apiError = error?.response?.data?.error;
+  const reason = apiError?.errors?.[0]?.reason || error?.errors?.[0]?.reason || '';
+  const message = apiError?.message || error?.message || operation;
+  const wrapped = new Error(`${operation}: ${message}`);
+  wrapped.code = 'GOOGLE_DRIVE_API_ERROR';
+  wrapped.httpStatus = status;
+  wrapped.googleReason = reason;
+  return wrapped;
 }
 
 function driveClient() {
@@ -32,6 +51,96 @@ function safeName(originalName = 'product-image') {
   return `nexora-${Date.now()}-${base}${ext || ''}`;
 }
 
+async function getAccessibleConfiguredFolder(drive) {
+  const folderId = optionalEnv('GOOGLE_DRIVE_FOLDER_ID');
+  if (!folderId) return null;
+
+  try {
+    const response = await drive.files.get({
+      fileId: folderId,
+      fields: 'id,name,mimeType,trashed',
+      supportsAllDrives: true
+    });
+    if (response.data?.mimeType === FOLDER_MIME && !response.data?.trashed) {
+      return {
+        id: response.data.id,
+        name: response.data.name,
+        source: 'configured'
+      };
+    }
+  } catch (error) {
+    const status = Number(error?.response?.status || error?.code || 0);
+    if (status !== 403 && status !== 404) throw normalizeGoogleError(error, 'Could not inspect configured Google Drive folder');
+  }
+
+  return null;
+}
+
+async function findManagedFolder(drive) {
+  try {
+    const escapedName = MANAGED_FOLDER_NAME.replace(/'/g, "\\'");
+    const response = await drive.files.list({
+      q: `name='${escapedName}' and mimeType='${FOLDER_MIME}' and trashed=false`,
+      spaces: 'drive',
+      pageSize: 10,
+      fields: 'files(id,name,mimeType)'
+    });
+    const folder = response.data.files?.[0];
+    return folder ? { id: folder.id, name: folder.name, source: 'managed-existing' } : null;
+  } catch (error) {
+    throw normalizeGoogleError(error, 'Could not search for the NEXORA Google Drive folder');
+  }
+}
+
+async function createManagedFolder(drive) {
+  try {
+    const response = await drive.files.create({
+      requestBody: {
+        name: MANAGED_FOLDER_NAME,
+        mimeType: FOLDER_MIME,
+        appProperties: { nexoraManaged: 'true', purpose: 'product-images' }
+      },
+      fields: 'id,name,mimeType'
+    });
+    return {
+      id: response.data.id,
+      name: response.data.name || MANAGED_FOLDER_NAME,
+      source: 'managed-created'
+    };
+  } catch (error) {
+    throw normalizeGoogleError(error, 'Could not create the NEXORA Product Images folder');
+  }
+}
+
+async function resolveUploadFolder(drive) {
+  const configured = await getAccessibleConfiguredFolder(drive);
+  if (configured) return configured;
+
+  const existing = await findManagedFolder(drive);
+  if (existing) return existing;
+
+  return createManagedFolder(drive);
+}
+
+export async function inspectGoogleDrive() {
+  const drive = driveClient();
+  try {
+    const [about, folder] = await Promise.all([
+      drive.about.get({ fields: 'user(displayName,emailAddress),storageQuota(limit,usage)' }),
+      resolveUploadFolder(drive)
+    ]);
+    return {
+      connected: true,
+      user: about.data.user || null,
+      folder,
+      configuredFolderAccessible: folder.source === 'configured'
+    };
+  } catch (error) {
+    if (error?.code === 'GOOGLE_DRIVE_API_ERROR') throw error;
+    throw normalizeGoogleError(error, 'Google Drive connection check failed');
+  }
+}
+
 export async function uploadProductImage(file) {
   if (!file?.buffer?.length) {
     const error = new Error('No image file was provided.');
@@ -39,21 +148,27 @@ export async function uploadProductImage(file) {
     throw error;
   }
 
-  const folderId = requiredEnv('GOOGLE_DRIVE_FOLDER_ID');
   const drive = driveClient();
+  const folder = await resolveUploadFolder(drive);
 
-  const result = await drive.files.create({
-    requestBody: {
-      name: safeName(file.originalname),
-      parents: [folderId]
-    },
-    media: {
-      mimeType: file.mimetype,
-      body: Readable.from(file.buffer)
-    },
-    fields: 'id,name,mimeType,size,webViewLink',
-    supportsAllDrives: true
-  });
+  let result;
+  try {
+    result = await drive.files.create({
+      requestBody: {
+        name: safeName(file.originalname),
+        parents: [folder.id],
+        appProperties: { nexoraManaged: 'true', purpose: 'product-image' }
+      },
+      media: {
+        mimeType: file.mimetype,
+        body: Readable.from(file.buffer)
+      },
+      fields: 'id,name,mimeType,size,webViewLink,parents',
+      supportsAllDrives: true
+    });
+  } catch (error) {
+    throw normalizeGoogleError(error, 'Google Drive image upload failed');
+  }
 
   const fileId = result.data.id;
   if (!fileId) {
@@ -71,7 +186,7 @@ export async function uploadProductImage(file) {
     });
   } catch (error) {
     publicPermission = false;
-    console.warn('Google Drive public permission could not be applied:', error?.message || error);
+    console.warn('Google Drive public permission could not be applied:', error?.response?.data?.error?.message || error?.message || error);
   }
 
   return {
@@ -81,6 +196,9 @@ export async function uploadProductImage(file) {
     size: result.data.size == null ? file.size : Number(result.data.size),
     imageUrl: `https://drive.google.com/uc?export=view&id=${fileId}`,
     webViewLink: result.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`,
-    publicPermission
+    publicPermission,
+    folderId: folder.id,
+    folderName: folder.name,
+    folderSource: folder.source
   };
 }
