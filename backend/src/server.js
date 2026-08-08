@@ -2,12 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import multer from 'multer';
 import { ZodError } from 'zod';
 import { prisma } from './lib/prisma.js';
 import productsRouter from './routes/products.js';
 import categoriesRouter from './routes/categories.js';
 import ordersRouter from './routes/orders.js';
 import adminRouter from './routes/admin.js';
+import uploadsRouter from './routes/uploads.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -39,9 +41,9 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.get('/', (_req, res) => {
   res.json({
     name: 'NEXORA PC Store API',
-    version: '1.1.0',
+    version: '1.2.0',
     status: 'online',
-    endpoints: ['/api/health', '/api/products', '/api/categories', '/api/orders', '/api/admin']
+    endpoints: ['/api/health', '/api/products', '/api/categories', '/api/orders', '/api/admin', '/api/admin/uploads/product-image']
   });
 });
 
@@ -62,6 +64,7 @@ app.use('/api/products', productsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/admin/uploads', uploadsRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });
@@ -73,6 +76,21 @@ app.use((error, _req, res, _next) => {
       error: 'Validation failed',
       details: error.issues
     });
+  }
+
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Image is too large. Maximum size is 10 MB.' });
+    }
+    return res.status(400).json({ error: error.message || 'Invalid file upload.' });
+  }
+
+  if (error?.code === 'INVALID_IMAGE_TYPE' || error?.code === 'UPLOAD_FILE_MISSING') {
+    return res.status(400).json({ error: error.message });
+  }
+
+  if (error?.code === 'GOOGLE_DRIVE_NOT_CONFIGURED') {
+    return res.status(503).json({ error: 'Google Drive upload is not configured yet.', missingConfiguration: error.message });
   }
 
   if (error?.message === 'CORS_NOT_ALLOWED') {
