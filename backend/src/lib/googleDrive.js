@@ -234,12 +234,16 @@ export async function uploadProductImage(file) {
     console.warn('Google Drive public permission could not be applied:', error?.response?.data?.error?.message || error?.message || error);
   }
 
+  const webViewLink = result.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
+  const imageUrl = `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
+
   return {
     fileId,
     name: result.data.name,
     mimeType: result.data.mimeType,
     size: result.data.size == null ? file.size : Number(result.data.size),
-    webViewLink: result.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`,
+    webViewLink,
+    imageUrl,
     publicPermission,
     folderId: folder.id,
     folderName: folder.name,
