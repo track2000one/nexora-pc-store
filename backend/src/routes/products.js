@@ -34,12 +34,18 @@ function slugify(value) {
     .replace(/^-+|-+$/g, '');
 }
 
-function serializeProduct(product) {
+function proxyUrl(req, fileId) {
+  if (!fileId) return null;
+  return `${req.protocol}://${req.get('host')}/api/media/${encodeURIComponent(fileId)}`;
+}
+
+function serializeProduct(product, req) {
   return {
     ...product,
     rating: Number(product.rating),
     price: Number(product.price),
-    oldPrice: product.oldPrice == null ? null : Number(product.oldPrice)
+    oldPrice: product.oldPrice == null ? null : Number(product.oldPrice),
+    imageUrl: product.imageDriveId ? proxyUrl(req, product.imageDriveId) : product.imageUrl
   };
 }
 
@@ -68,7 +74,7 @@ router.get('/', async (req, res, next) => {
       orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }]
     });
 
-    res.json({ data: products.map(serializeProduct), count: products.length });
+    res.json({ data: products.map((product) => serializeProduct(product, req)), count: products.length });
   } catch (error) {
     next(error);
   }
@@ -85,7 +91,7 @@ router.get('/:idOrSlug', async (req, res, next) => {
     });
 
     if (!product) return res.status(404).json({ error: 'Product not found' });
-    res.json({ data: serializeProduct(product) });
+    res.json({ data: serializeProduct(product, req) });
   } catch (error) {
     next(error);
   }
@@ -101,7 +107,7 @@ router.post('/', requireAdmin, async (req, res, next) => {
       },
       include: { category: true }
     });
-    res.status(201).json({ data: serializeProduct(product) });
+    res.status(201).json({ data: serializeProduct(product, req) });
   } catch (error) {
     next(error);
   }
@@ -118,7 +124,7 @@ router.put('/:id', requireAdmin, async (req, res, next) => {
       },
       include: { category: true }
     });
-    res.json({ data: serializeProduct(product) });
+    res.json({ data: serializeProduct(product, req) });
   } catch (error) {
     next(error);
   }
@@ -131,7 +137,7 @@ router.delete('/:id', requireAdmin, async (req, res, next) => {
       data: { status: 'ARCHIVED' },
       include: { category: true }
     });
-    res.json({ data: serializeProduct(product), archived: true });
+    res.json({ data: serializeProduct(product, req), archived: true });
   } catch (error) {
     next(error);
   }
