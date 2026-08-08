@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { products as fallbackProducts } from './data';
+import AdminApp from './admin.jsx';
 import './styles.css';
 
 const themes = ['ocean', 'ruby', 'mint'];
@@ -93,7 +94,7 @@ function ProductCard({ product, onAdd, onPreview }) {
   );
 }
 
-function App() {
+function Storefront() {
   const [themeIndex, setThemeIndex] = useState(0);
   const [cart, setCart] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -163,4 +164,6 @@ function App() {
   </div>;
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+const root = createRoot(document.getElementById('root'));
+const isAdmin = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/');
+root.render(isAdmin ? <AdminApp apiUrl={API_URL}/> : <Storefront/>);
