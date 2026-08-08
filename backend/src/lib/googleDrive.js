@@ -62,15 +62,13 @@ async function getAccessibleConfiguredFolder(drive) {
       supportsAllDrives: true
     });
     if (response.data?.mimeType === FOLDER_MIME && !response.data?.trashed) {
-      return {
-        id: response.data.id,
-        name: response.data.name,
-        source: 'configured'
-      };
+      return { id: response.data.id, name: response.data.name, source: 'configured' };
     }
   } catch (error) {
     const status = Number(error?.response?.status || error?.code || 0);
-    if (status !== 403 && status !== 404) throw normalizeGoogleError(error, 'Could not inspect configured Google Drive folder');
+    if (status !== 403 && status !== 404) {
+      throw normalizeGoogleError(error, 'Could not inspect configured Google Drive folder');
+    }
   }
 
   return null;
@@ -141,6 +139,53 @@ export async function inspectGoogleDrive() {
   }
 }
 
+export async function getProductImageStream(fileId) {
+  const safeFileId = String(fileId || '').trim();
+  if (!/^[A-Za-z0-9_-]{10,200}$/.test(safeFileId)) {
+    const error = new Error('Invalid Google Drive file ID.');
+    error.code = 'INVALID_DRIVE_FILE_ID';
+    throw error;
+  }
+
+  const drive = driveClient();
+  try {
+    const metadata = await drive.files.get({
+      fileId: safeFileId,
+      fields: 'id,name,mimeType,size,modifiedTime,trashed',
+      supportsAllDrives: true
+    });
+
+    if (metadata.data?.trashed) {
+      const error = new Error('Google Drive image is in trash.');
+      error.code = 'DRIVE_FILE_NOT_FOUND';
+      throw error;
+    }
+
+    const mimeType = String(metadata.data?.mimeType || 'application/octet-stream');
+    if (!mimeType.startsWith('image/')) {
+      const error = new Error('Requested Google Drive file is not an image.');
+      error.code = 'INVALID_IMAGE_TYPE';
+      throw error;
+    }
+
+    const media = await drive.files.get(
+      { fileId: safeFileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    );
+
+    return {
+      stream: media.data,
+      mimeType,
+      size: metadata.data?.size == null ? null : Number(metadata.data.size),
+      name: metadata.data?.name || 'product-image',
+      modifiedTime: metadata.data?.modifiedTime || null
+    };
+  } catch (error) {
+    if (error?.code === 'INVALID_IMAGE_TYPE' || error?.code === 'DRIVE_FILE_NOT_FOUND') throw error;
+    throw normalizeGoogleError(error, 'Google Drive image download failed');
+  }
+}
+
 export async function uploadProductImage(file) {
   if (!file?.buffer?.length) {
     const error = new Error('No image file was provided.');
@@ -194,7 +239,6 @@ export async function uploadProductImage(file) {
     name: result.data.name,
     mimeType: result.data.mimeType,
     size: result.data.size == null ? file.size : Number(result.data.size),
-    imageUrl: `https://drive.google.com/uc?export=view&id=${fileId}`,
     webViewLink: result.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`,
     publicPermission,
     folderId: folder.id,
