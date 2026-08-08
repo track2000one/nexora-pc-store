@@ -2,23 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { createAdminToken, requireAdmin, verifyAdminKey } from '../middleware/admin.js';
+import { serializeProduct } from '../lib/productImages.js';
 
 const router = Router();
-
-function proxyUrl(req, fileId) {
-  if (!fileId) return null;
-  return `${req.protocol}://${req.get('host')}/api/media/${encodeURIComponent(fileId)}`;
-}
-
-function serializeProduct(product, req) {
-  return {
-    ...product,
-    rating: Number(product.rating),
-    price: Number(product.price),
-    oldPrice: product.oldPrice == null ? null : Number(product.oldPrice),
-    imageUrl: product.imageDriveId ? proxyUrl(req, product.imageDriveId) : product.imageUrl
-  };
-}
 
 router.post('/login', (req, res) => {
   const { key } = z.object({ key: z.string().min(16).max(500) }).parse(req.body);
@@ -87,7 +73,10 @@ router.get('/products', requireAdmin, async (req, res, next) => {
             }
           : {})
       },
-      include: { category: true },
+      include: {
+        category: true,
+        images: { orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }] }
+      },
       orderBy: [{ status: 'asc' }, { featured: 'desc' }, { updatedAt: 'desc' }]
     });
 
