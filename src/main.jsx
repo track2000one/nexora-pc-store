@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { products as fallbackProducts } from './data';
 import AdminApp from './admin.jsx';
+import './adminUploadEnhancer.js';
 import './styles.css';
 
 const themes = ['ocean', 'ruby', 'mint'];
