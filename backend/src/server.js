@@ -10,6 +10,7 @@ import categoriesRouter from './routes/categories.js';
 import ordersRouter from './routes/orders.js';
 import adminRouter from './routes/admin.js';
 import uploadsRouter from './routes/uploads.js';
+import mediaRouter from './routes/media.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -41,25 +42,22 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.get('/', (_req, res) => {
   res.json({
     name: 'NEXORA PC Store API',
-    version: '1.2.1',
+    version: '1.3.0',
     status: 'online',
-    endpoints: ['/api/health', '/api/products', '/api/categories', '/api/orders', '/api/admin', '/api/admin/uploads/product-image']
+    endpoints: ['/api/health', '/api/products', '/api/categories', '/api/orders', '/api/admin', '/api/media/:fileId', '/api/admin/uploads/product-image']
   });
 });
 
 app.get('/api/health', async (_req, res, next) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({
-      status: 'ok',
-      database: 'connected',
-      timestamp: new Date().toISOString()
-    });
+    res.json({ status: 'ok', database: 'connected', timestamp: new Date().toISOString() });
   } catch (error) {
     next(error);
   }
 });
 
+app.use('/api/media', mediaRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/orders', ordersRouter);
@@ -72,10 +70,7 @@ app.use((_req, res) => {
 
 app.use((error, _req, res, _next) => {
   if (error instanceof ZodError) {
-    return res.status(400).json({
-      error: 'Validation failed',
-      details: error.issues
-    });
+    return res.status(400).json({ error: 'Validation failed', details: error.issues });
   }
 
   if (error instanceof multer.MulterError) {
@@ -85,8 +80,12 @@ app.use((error, _req, res, _next) => {
     return res.status(400).json({ error: error.message || 'Invalid file upload.' });
   }
 
-  if (error?.code === 'INVALID_IMAGE_TYPE' || error?.code === 'UPLOAD_FILE_MISSING') {
+  if (error?.code === 'INVALID_IMAGE_TYPE' || error?.code === 'UPLOAD_FILE_MISSING' || error?.code === 'INVALID_DRIVE_FILE_ID') {
     return res.status(400).json({ error: error.message });
+  }
+
+  if (error?.code === 'DRIVE_FILE_NOT_FOUND') {
+    return res.status(404).json({ error: error.message });
   }
 
   if (error?.code === 'GOOGLE_DRIVE_NOT_CONFIGURED') {
@@ -105,11 +104,11 @@ app.use((error, _req, res, _next) => {
     if (/invalid_grant/i.test(error?.message || '') || /invalid_grant/i.test(reason)) {
       hint = 'رمز GOOGLE_REFRESH_TOKEN غير صالح أو انتهت صلاحيته. أنشئ Refresh Token جديدًا ثم حدّثه في Railway.';
     } else if (/insufficient|permission|forbidden|notFound/i.test(`${reason} ${error?.message || ''}`)) {
-      hint = 'صلاحية Google Drive لا تسمح بالوصول إلى المجلد المحدد. NEXORA سيستخدم مجلدًا يديره التطبيق تلقائيًا عند توفر drive.file.';
+      hint = 'صلاحية Google Drive لا تسمح بالوصول إلى الملف أو المجلد المطلوب.';
     }
 
     return res.status(502).json({
-      error: 'Google Drive upload failed.',
+      error: 'Google Drive request failed.',
       code: reason || 'GOOGLE_DRIVE_API_ERROR',
       message: error?.message || 'Google Drive request failed.',
       hint
