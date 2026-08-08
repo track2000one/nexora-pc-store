@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { requireAdmin } from '../middleware/admin.js';
+import { serializeProduct } from '../lib/productImages.js';
 
 const router = Router();
 
@@ -34,20 +35,10 @@ function slugify(value) {
     .replace(/^-+|-+$/g, '');
 }
 
-function proxyUrl(req, fileId) {
-  if (!fileId) return null;
-  return `${req.protocol}://${req.get('host')}/api/media/${encodeURIComponent(fileId)}`;
-}
-
-function serializeProduct(product, req) {
-  return {
-    ...product,
-    rating: Number(product.rating),
-    price: Number(product.price),
-    oldPrice: product.oldPrice == null ? null : Number(product.oldPrice),
-    imageUrl: product.imageDriveId ? proxyUrl(req, product.imageDriveId) : product.imageUrl
-  };
-}
+const includeProduct = {
+  category: true,
+  images: { orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }] }
+};
 
 router.get('/', async (req, res, next) => {
   try {
@@ -70,7 +61,7 @@ router.get('/', async (req, res, next) => {
             }
           : {})
       },
-      include: { category: true },
+      include: includeProduct,
       orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }]
     });
 
@@ -87,7 +78,7 @@ router.get('/:idOrSlug', async (req, res, next) => {
         status: 'ACTIVE',
         OR: [{ id: req.params.idOrSlug }, { slug: req.params.idOrSlug }]
       },
-      include: { category: true }
+      include: includeProduct
     });
 
     if (!product) return res.status(404).json({ error: 'Product not found' });
@@ -105,7 +96,7 @@ router.post('/', requireAdmin, async (req, res, next) => {
         ...parsed,
         slug: parsed.slug || slugify(parsed.name)
       },
-      include: { category: true }
+      include: includeProduct
     });
     res.status(201).json({ data: serializeProduct(product, req) });
   } catch (error) {
@@ -122,7 +113,7 @@ router.put('/:id', requireAdmin, async (req, res, next) => {
         ...parsed,
         ...(parsed.name && !parsed.slug ? { slug: slugify(parsed.name) } : {})
       },
-      include: { category: true }
+      include: includeProduct
     });
     res.json({ data: serializeProduct(product, req) });
   } catch (error) {
@@ -135,7 +126,7 @@ router.delete('/:id', requireAdmin, async (req, res, next) => {
     const product = await prisma.product.update({
       where: { id: req.params.id },
       data: { status: 'ARCHIVED' },
-      include: { category: true }
+      include: includeProduct
     });
     res.json({ data: serializeProduct(product, req), archived: true });
   } catch (error) {
