@@ -41,7 +41,7 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.get('/', (_req, res) => {
   res.json({
     name: 'NEXORA PC Store API',
-    version: '1.2.0',
+    version: '1.2.1',
     status: 'online',
     endpoints: ['/api/health', '/api/products', '/api/categories', '/api/orders', '/api/admin', '/api/admin/uploads/product-image']
   });
@@ -91,6 +91,29 @@ app.use((error, _req, res, _next) => {
 
   if (error?.code === 'GOOGLE_DRIVE_NOT_CONFIGURED') {
     return res.status(503).json({ error: 'Google Drive upload is not configured yet.', missingConfiguration: error.message });
+  }
+
+  if (error?.code === 'GOOGLE_DRIVE_API_ERROR' || error?.code === 'GOOGLE_DRIVE_UPLOAD_FAILED') {
+    console.error('Google Drive error:', {
+      message: error?.message,
+      reason: error?.googleReason,
+      status: error?.httpStatus
+    });
+
+    const reason = String(error?.googleReason || '');
+    let hint = 'راجع إعداد OAuth في Google Cloud والمتغيرات الموجودة في Railway.';
+    if (/invalid_grant/i.test(error?.message || '') || /invalid_grant/i.test(reason)) {
+      hint = 'رمز GOOGLE_REFRESH_TOKEN غير صالح أو انتهت صلاحيته. أنشئ Refresh Token جديدًا ثم حدّثه في Railway.';
+    } else if (/insufficient|permission|forbidden|notFound/i.test(`${reason} ${error?.message || ''}`)) {
+      hint = 'صلاحية Google Drive لا تسمح بالوصول إلى المجلد المحدد. NEXORA سيستخدم مجلدًا يديره التطبيق تلقائيًا عند توفر drive.file.';
+    }
+
+    return res.status(502).json({
+      error: 'Google Drive upload failed.',
+      code: reason || 'GOOGLE_DRIVE_API_ERROR',
+      message: error?.message || 'Google Drive request failed.',
+      hint
+    });
   }
 
   if (error?.message === 'CORS_NOT_ALLOWED') {
