@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAdmin } from '../middleware/admin.js';
-import { uploadProductImage } from '../lib/googleDrive.js';
+import { inspectGoogleDrive, uploadProductImage } from '../lib/googleDrive.js';
 
 const router = Router();
 
@@ -29,17 +29,37 @@ const upload = multer({
   }
 });
 
-router.get('/status', requireAdmin, (_req, res) => {
-  const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN', 'GOOGLE_DRIVE_FOLDER_ID'];
-  const missing = required.filter((name) => !String(process.env[name] || '').trim());
-  res.json({
-    data: {
-      configured: missing.length === 0,
-      missing,
-      maxFileSizeMb: 10,
-      allowedTypes: [...allowedMimeTypes]
+router.get('/status', requireAdmin, async (_req, res, next) => {
+  try {
+    const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'];
+    const missing = required.filter((name) => !String(process.env[name] || '').trim());
+    if (missing.length) {
+      return res.json({
+        data: {
+          configured: false,
+          connected: false,
+          missing,
+          maxFileSizeMb: 10,
+          allowedTypes: [...allowedMimeTypes]
+        }
+      });
     }
-  });
+
+    const drive = await inspectGoogleDrive();
+    res.json({
+      data: {
+        configured: true,
+        connected: true,
+        missing: [],
+        maxFileSizeMb: 10,
+        allowedTypes: [...allowedMimeTypes],
+        folder: drive.folder,
+        configuredFolderAccessible: drive.configuredFolderAccessible
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/product-image', requireAdmin, upload.single('file'), async (req, res, next) => {
