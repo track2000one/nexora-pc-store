@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { products as fallbackProducts } from './data';
 import AdminApp from './admin.jsx';
+import AccountApp from './account.jsx';
 import './adminUploadEnhancer.js';
 import './styles.css';
 import './productGallery.css';
@@ -63,6 +64,7 @@ function Icon({ name }) {
     eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
     cart: <><path d="M3 4h2l2.1 9.1a2 2 0 0 0 2 1.5h7.7a2 2 0 0 0 2-1.6L20 7H6"/><circle cx="10" cy="19" r="1.2"/><circle cx="18" cy="19" r="1.2"/></>,
     palette: <><path d="M12 3c-5 0-9 3.6-9 8 0 4 3.3 7 7.3 7H12a1.5 1.5 0 0 0 0-3h-.7c-.8 0-1.3-.7-1.3-1.4 0-.8.6-1.5 1.4-1.5h4.1A5.5 5.5 0 0 0 21 6.7C19.4 4.4 15.8 3 12 3Z"/><circle cx="7.5" cy="9" r="1"/><circle cx="11" cy="6.8" r="1"/><circle cx="15" cy="7.5" r="1"/></>,
+    user: <><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></>,
     close: <path d="M6 6l12 12M18 6 6 18"/>,
     zoom: <><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6"/></>,
     chevronLeft: <path d="m15 18-6-6 6-6"/>,
@@ -258,6 +260,7 @@ function Storefront() {
       <div className="brand"><span className="logo">NX</span><div><b>NEXORA</b><small>PC STORE</small></div></div>
       <nav><a href="#products">المنتجات</a><a href="#categories">التصنيفات</a><a href="#offers">العروض</a></nav>
       <div className="header-actions">
+        <a className="account-chip-store" href="/account" title="حسابي" aria-label="حسابي"><Icon name="user"/></a>
         <button className="theme-btn" onClick={() => setThemeIndex((themeIndex + 1) % themes.length)} title="تغيير الثيم"><Icon name="palette"/></button>
         <button className="cart-chip"><Icon name="cart"/><span>{cart.length}</span></button>
       </div>
@@ -285,5 +288,7 @@ function Storefront() {
 }
 
 const root = createRoot(document.getElementById('root'));
-const isAdmin = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/');
-root.render(isAdmin ? <AdminApp apiUrl={API_URL}/> : <Storefront/>);
+const path = window.location.pathname;
+const isAdmin = path === '/admin' || path.startsWith('/admin/');
+const isAccount = path === '/account' || path.startsWith('/account/') || path === '/login' || path === '/signup' || path === '/forgot-password';
+root.render(isAdmin ? <AdminApp apiUrl={API_URL}/> : isAccount ? <AccountApp apiUrl={API_URL}/> : <Storefront/>);
