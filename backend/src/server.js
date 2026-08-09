@@ -11,6 +11,7 @@ import ordersRouter from './routes/orders.js';
 import adminRouter from './routes/admin.js';
 import uploadsRouter from './routes/uploads.js';
 import mediaRouter from './routes/media.js';
+import authRouter from './routes/auth.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -42,9 +43,9 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.get('/', (_req, res) => {
   res.json({
     name: 'NEXORA PC Store API',
-    version: '1.3.1',
+    version: '1.4.0',
     status: 'online',
-    endpoints: ['/api/health', '/api/products', '/api/categories', '/api/orders', '/api/admin', '/api/media/:fileId', '/api/admin/uploads/product-image']
+    endpoints: ['/api/health', '/api/auth', '/api/products', '/api/categories', '/api/orders', '/api/admin', '/api/media/:fileId', '/api/admin/uploads/product-image']
   });
 });
 
@@ -57,6 +58,7 @@ app.get('/api/health', async (_req, res, next) => {
   }
 });
 
+app.use('/api/auth', authRouter);
 app.use('/api/media', mediaRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/categories', categoriesRouter);
@@ -78,6 +80,10 @@ app.use((error, _req, res, _next) => {
       return res.status(413).json({ error: 'Image is too large. Maximum size is 10 MB.' });
     }
     return res.status(400).json({ error: error.message || 'Invalid file upload.' });
+  }
+
+  if (error?.code === 'INVALID_PHONE') {
+    return res.status(400).json({ error: 'INVALID_PHONE', message: 'رقم الجوال غير صحيح. مثال: 05XXXXXXXX أو +9665XXXXXXXX.' });
   }
 
   if (error?.code === 'INVALID_IMAGE_TYPE' || error?.code === 'UPLOAD_FILE_MISSING' || error?.code === 'INVALID_DRIVE_FILE_ID') {
